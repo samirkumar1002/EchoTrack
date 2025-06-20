@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoTrack AI - Command Center</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Inter:wght@400;500;600&display=swap');
+        
+        :root {
+            --aqi-color: #4ade80; /* Default Green */
+            --aqi-glow: 0 0 15px #4ade80, 0 0 30px #4ade80;
+        }
+
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #0c0a09;
+        }
+
+        .font-orbitron { font-family: 'Orbitron', sans-serif; }
+
+        .card {
+            background: rgba(12, 10, 9, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1rem;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease-in-out;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.05), transparent 70%);
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .card:hover::before {
+            opacity: 1;
+        }
+        
+        .glow-border {
+            box-shadow: 0 0 2px rgba(255,255,255,0.2), inset 0 0 2px rgba(255,255,255,0.1);
+        }
+
+        #app {
+            background-image:
+                radial-gradient(ellipse at 70% 20%, var(--aqi-color, #4ade80) 0%, transparent S40%),
+                radial-gradient(ellipse at 30% 80%, #3b82f6 0%, transparent 40%);
+            background-color: #0c0a09;
+            transition: background-image 1s ease-in-out;
+        }
+        
+        .compass-dial {
+            transition: transform 1s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+
+        .fade-in {
+            animation: fadeIn 1s ease-in-out forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Leaflet theme adjustments */
+        .leaflet-container {
+            background: #1a1a1a;
+        }
+        .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+            background: #18181b;
+            color: #e5e5e5;
+            box-shadow: 0 3px 14px rgba(0,0,0,0.4);
+            border-radius: 0.5rem;
+        }
+        .leaflet-control-zoom-in, .leaflet-control-zoom-out {
+            background-color: #18181b !important;
+            color: #e5e5e5 !important;
+            border-color: rgba(255,255,255,0.2) !important;
+        }
+        .leaflet-control-zoom-in:hover, .leaflet-control-zoom-out:hover {
+            background-color: #27272a !important;
+        }
+        
+        /* Custom map marker */
+        .pulsing-marker {
+            width: 20px;
+            height: 20px;
+            background-color: var(--aqi-color, #4ade80);
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 10px var(--aqi-color, #4ade80), 0 0 20px var(--aqi-color, #4ade80);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); }
+            70% { transform: scale(1); }
+            100% { transform: scale(0.9); }
+        }
+
+        /* Weather Icon Animations */
+        @keyframes sun-pulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 10px #facc15, 0 0 15px #facc15; }
+            50% { transform: scale(1.1); box-shadow: 0 0 15px #fde047, 0 0 25px #fde047; }
+        }
+        .weather-icon .sun { animation: sun-pulse 3s infinite ease-in-out; }
+        
+        @keyframes cloud-drift {
+            0%, 100% { transform: translateX(-5px); }
+            50% { transform: translateX(5px); }
+        }
+        .weather-icon .cloud { animation: cloud-drift 5s infinite ease-in-out; }
+        
+        @keyframes rain-drop {
+            0% { transform: translateY(-5px); opacity: 1; }
+            100% { transform: translateY(10px); opacity: 0; }
+        }
+        .weather-icon .rain-1 { animation: rain-drop 1.5s infinite linear; animation-delay: 0s; }
+        .weather-icon .rain-2 { animation: rain-drop 1.5s infinite linear; animation-delay: 0.5s; }
+        .weather-icon .rain-3 { animation: rain-drop 1.5s infinite linear; animation-delay: 1s; }
+
+    </style>
+</head>
+<body class="text-gray-200">
+
+    <div id="app" class="min-h-screen p-4 md:p-6 lg:p-8">
+        <header class="flex flex-col sm:flex-row justify-between items-center mb-6 fade-in">
+            <div class="flex items-center mb-2 sm:mb-0">
+                <i data-lucide="satellite" class="w-8 h-8 text-cyan-400" style="filter: drop-shadow(0 0 5px #22d3ee);"></i>
+                <h1 class="text-2xl sm:text-3xl font-orbitron font-bold text-white ml-3 tracking-widest">ECOTRACK AI</h1>
+            </div>
+            <div id="time-display" class="font-orbitron text-base sm:text-lg text-gray-300"></div>
+        </header>
+
+        <form id="searchForm" class="mb-8 fade-in" style="animation-delay: 0.1s;">
+            <div class="relative">
+                <input id="locationInput" type="text" value="Guwahati" class="w-full pl-10 pr-28 sm:pl-12 sm:pr-36 py-3 sm:py-4 text-base sm:text-lg bg-black/50 backdrop-blur-sm rounded-full border border-gray-700 focus:border-cyan-400 focus:outline-none transition-all placeholder-gray-500 font-orbitron"/>
+                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 w-5 h-5"></i>
+                <button type="submit" id="searchButton" class="absolute right-1.5 sm:right-2 top-1/2 -translate-y-1/2 px-4 sm:px-6 py-2 sm:py-2.5 bg-cyan-500/80 text-white rounded-full font-semibold hover:bg-cyan-400 disabled:bg-cyan-800 flex items-center transition-all font-orbitron text-sm sm:text-base">
+                    <span id="searchButtonContent" class="flex items-center">ANALYZE</span>
+                </button>
+            </div>
+        </form>
+
+        <main id="contentArea" class="opacity-0">
+            </main>
+        
+        <div id="welcomeMessage" class="text-center p-10 flex flex-col items-center justify-center h-[60vh]">
+             <div class="w-48 h-48 sm:w-64 sm:h-64 relative mb-4">
+                 <div id="globe-placeholder" class="w-full h-full" style="background: url('https://www.transparentpng.com/thumb/earth/6fxdsc-earth-world-map-picture.png') center center / contain no-repeat; animation: rotate 40s linear infinite; filter: drop-shadow(0 0 25px #3b82f6);"></div>
+             </div>
+             <h2 class="text-3xl sm:text-4xl font-orbitron font-bold mb-2 text-white">Awaiting Transmission...</h2>
+             <p class="text-gray-400 text-base sm:text-lg">Enter a specific city to initiate environmental scan.</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const OPENWEATHER_API_KEY = '40f211cfe39230179eefdfa9379ae888'; 
+
+            // --- DOM Elements ---
+            const searchForm = document.getElementById('searchForm');
+            const locationInput = document.getElementById('locationInput');
+            const searchButton = document.getElementById('searchButton');
+            const searchButtonContent = document.getElementById('searchButtonContent');
+            const contentArea = document.getElementById('contentArea');
+            const welcomeMessage = document.getElementById('welcomeMessage');
+            const timeDisplay = document.getElementById('time-display');
+
+            // --- State Instances ---
+            let chartInstances = {};
+            let mapInstance = null;
+
+            // --- Initial Setup ---
+            lucide.createIcons();
+            setInterval(() => {
+                const now = new Date();
+                timeDisplay.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            }, 1000);
+
+            // --- Search Handler ---
+            const handleSearch = async (event) => {
+                event.preventDefault();
+                const location = locationInput.value;
+                if (!location) return;
+
+                setLoadingState(true);
+                welcomeMessage.classList.add('hidden');
+                contentArea.classList.remove('fade-in');
+                contentArea.style.opacity = '0';
+
+                try {
+                    const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${location}&limit=1&appid=${OPENWEATHER_API_KEY}`;
+                    const geoResponse = await fetch(geoUrl);
+                    if (!geoResponse.ok) throw new Error(`Network response error: ${geoResponse.status}`);
+                    const geoData = await geoResponse.json();
+                    if (!geoData || geoData.length === 0) throw new Error(`Location "${location}" not found. Please enter a specific city name.`);
+                    
+                    const { lat, lon, name, country } = geoData[0];
+                    const locationName = `${name}, ${country}`;
+                    
+                    const airPollutionUrl = `https://api.openweathermap.org/data/2.5/air_pollution?lat=${lat}&lon=${lon}&appid=${OPENWEATHER_API_KEY}`;
+                    const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${OPENWEATHER_API_KEY}`;
+                    const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&units=metric&appid=${OPENWEATHER_API_KEY}`;
+
+                    const [airResponse, weatherResponse, forecastResponse] = await Promise.all([
+                        fetch(airPollutionUrl),
+                        fetch(weatherUrl),
+                        fetch(forecastUrl)
+                    ]);
+                    
+                    if (!airResponse.ok) throw new Error('Air Quality data stream interrupted.');
+                    if (!weatherResponse.ok) throw new Error('Primary weather data stream interrupted.');
+                    if (!forecastResponse.ok) throw new Error('Forecast data stream interrupted.');
+
+                    const airData = await airResponse.json();
+                    const weatherData = await weatherResponse.json();
+                    const forecastData = await forecastResponse.json();
+                    
+                    const finalData = processApiData(locationName, airData, weatherData, forecastData, lat, lon);
+                    renderResults(finalData);
+                    contentArea.style.opacity = '1';
+                    contentArea.classList.add('fade-in');
+
+                } catch (err) {
+                    renderError(err.message);
+                } finally {
+                    setLoadingState(false);
+                }
+            };
+            
+            searchForm.addEventListener('submit', handleSearch);
+
+            const processApiData = (locationName, airData, weatherData, forecastData, lat, lon) => {
+                const aqi = airData.list[0].main.aqi;
+                
+                const aqiLevels = {
+                    1: { label: "Good", color: "#4ade80", glow: "0 0 15px #4ade80, 0 0 30px #4ade80", colorRgb: "74, 222, 128" },
+                    2: { label: "Fair", color: "#a3e635", glow: "0 0 15px #a3e635, 0 0 30px #a3e635", colorRgb: "163, 230, 53" },
+                    3: { label: "Moderate", color: "#facc15", glow: "0 0 15px #facc15, 0 0 30px #facc15", colorRgb: "250, 204, 21" },
+                    4: { label: "Poor", color: "#fb923c", glow: "0 0 15px #fb923c, 0 0 30px #fb923c", colorRgb: "251, 146, 60" },
+                    5: { label: "Hazardous", color: "#f87171", glow: "0 0 15px #f87171, 0 0 30px #f87171", colorRgb: "248, 113, 113" }
+                };
+
+                const healthRecs = {
+                    1: "Excellent air quality. Perfect day for all outdoor activities!",
+                    2: "Air quality is acceptable. Great for most activities.",
+                    3: "Sensitive groups may experience effects. Limit prolonged outdoor exertion.",
+                    4: "Everyone may begin to experience health effects. Limit time outdoors.",
+                    5: "Health alert: everyone may experience more serious health effects. Avoid outdoor activities."
+                };
+
+                // Process 5-day forecast from 3-hour data
+                const dailyForecasts = {};
+                forecastData.list.forEach(item => {
+                    const dateKey = new Date(item.dt * 1000).toISOString().split('T')[0];
+                    if (!dailyForecasts[dateKey]) {
+                        dailyForecasts[dateKey] = { temps: [], weathers: [] };
+                    }
+                    dailyForecasts[dateKey].temps.push(item.main.temp);
+                    dailyForecasts[dateKey].weathers.push(item.weather[0].main);
+                });
+
+                const processedForecast = Object.keys(dailyForecasts).map(dateKey => {
+                    const dayData = dailyForecasts[dateKey];
+                    const weatherMode = dayData.weathers.reduce(
+                        (a,b,i,arr)=> (arr.filter(v=>v===a).length>=arr.filter(v=>v===b).length?a:b), null);
+                    return {
+                        date: dateKey,
+                        max_temp: Math.max(...dayData.temps),
+                        min_temp: Math.min(...dayData.temps),
+                        weather: weatherMode,
+                    };
+                }).slice(0, 5);
+
+                const detailedForecast = forecastData.list.map(item => ({
+                    time: item.dt * 1000,
+                    temp: item.main.temp,
+                    pop: item.pop * 100 
+                }));
+
+                return {
+                    locationName, lat, lon,
+                    aqi: { value: aqi, ...aqiLevels[aqi] },
+                    healthRec: healthRecs[aqi],
+                    weather: {
+                        temp: weatherData.main.temp,
+                        feels_like: weatherData.main.feels_like,
+                        humidity: weatherData.main.humidity,
+                        pressure: weatherData.main.pressure,
+                        wind: { speed: weatherData.wind.speed, deg: weatherData.wind.deg },
+                        description: weatherData.weather[0].description,
+                        clouds: weatherData.clouds.all,
+                        visibility: weatherData.visibility,
+                    },
+                    pollutants: airData.list[0].components,
+                    forecast: processedForecast,
+                    detailedForecast: detailedForecast,
+                };
+            };
+            
+            const setLoadingState = (isLoading) => {
+                searchButton.disabled = isLoading;
+                searchButtonContent.innerHTML = isLoading 
+                    ? `<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>` 
+                    : 'ANALYZE';
+            };
+            
+            const renderError = (message) => {
+                contentArea.innerHTML = `<div class="card col-span-full p-8 text-center bg-red-900/50 border-red-700 fade-in"><i data-lucide="scan-error" class="mx-auto w-16 h-16 text-red-400 mb-4"></i><h3 class="text-3xl font-orbitron text-red-300">Transmission Error</h3><p class="text-red-400 mt-2">${message}</p></div>`;
+                welcomeMessage.classList.add('hidden');
+                contentArea.style.opacity = '1';
+                contentArea.classList.add('fade-in');
+                lucide.createIcons();
+            };
+
+            const destroyInstances = () => {
+                Object.values(chartInstances).forEach(chart => chart.destroy());
+                chartInstances = {};
+                if (mapInstance) {
+                    mapInstance.remove();
+                    mapInstance = null;
+                }
+            }
+
+            const getAnimatedWeatherIcon = (weather) => {
+                const iconClasses = `class="w-12 h-12 sm:w-16 sm:h-16 weather-icon"`;
+                switch(weather) {
+                    case 'Clear':
+                        return `<svg viewBox="0 0 50 50" ${iconClasses}><circle class="sun" cx="25" cy="25" r="10" fill="#facc15" /></svg>`;
+                    case 'Clouds':
+                        return `<svg viewBox="0 0 50 50" ${iconClasses}><path class="cloud" d="M 12.5,35.5 C 6,35.5 5.2,32.4 8.7,28.4 C 11.7,24.9 14.8,17.3 22.3,17.3 C 27.2,17.3 29.8,20.2 32.2,23.1 C 36,19.2 40.5,21.3 41.6,26.5 C 45.3,27.1 46.2,32.3 41,35.5 L 12.5,35.5 z" fill="#d1d5db" /></svg>`;
+                    case 'Rain':
+                        return `<svg viewBox="0 0 50 50" ${iconClasses}>
+                                    <path d="M 12.5,27.5 C 6,27.5 5.2,24.4 8.7,20.4 C 11.7,16.9 14.8,9.3 22.3,9.3 C 27.2,9.3 29.8,12.2 32.2,15.1 C 36,11.2 40.5,13.3 41.6,18.5 C 45.3,19.1 46.2,24.3 41,27.5 L 12.5,27.5 z" fill="#9ca3af" />
+                                    <line class="rain-1" x1="20" y1="32" x2="18" y2="40" stroke="#60a5fa" stroke-width="2" stroke-linecap="round"/>
+                                    <line class="rain-2" x1="28" y1="32" x2="26" y2="40" stroke="#60a5fa" stroke-width="2" stroke-linecap="round"/>
+                                    <line class="rain-3" x1="36" y1="32" x2="34" y2="40" stroke="#60a5fa" stroke-width="2" stroke-linecap="round"/>
+                                </svg>`;
+                    default: // Covers Haze, Mist, etc.
+                        return `<svg viewBox="0 0 50 50" ${iconClasses}><path d="M 12.5,35.5 C 6,35.5 5.2,32.4 8.7,28.4 C 11.7,24.9 14.8,17.3 22.3,17.3 C 27.2,17.3 29.8,20.2 32.2,23.1 C 36,19.2 40.5,21.3 41.6,26.5 C 45.3,27.1 46.2,32.3 41,35.5 L 12.5,35.5 z" fill="#d1d5db" /></svg>`;
+                }
+            };
+
+            const renderResults = (data) => {
+                destroyInstances();
+                const { aqi, healthRec, weather, pollutants, forecast, locationName } = data;
+                
+                document.documentElement.style.setProperty('--aqi-color', aqi.color);
+                document.documentElement.style.setProperty('--aqi-glow', aqi.glow);
+                document.documentElement.style.setProperty('--aqi-color-rgb', aqi.colorRgb);
+
+                // Create forecast HTML
+                const forecastHtml = forecast.map((day, index) => `
+                    <div class="text-center fade-in p-2" style="animation-delay: ${0.8 + index * 0.1}s;">
+                        <p class="font-orbitron font-bold text-base sm:text-lg">${new Date(day.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}</p>
+                        <div class="my-2">${getAnimatedWeatherIcon(day.weather)}</div>
+                        <p class="text-lg sm:text-xl font-bold">${day.max_temp.toFixed(0)}°</p>
+                        <p class="text-gray-400 text-sm sm:text-base">${day.min_temp.toFixed(0)}°</p>
+                    </div>
+                `).join('');
+
+                contentArea.innerHTML = `
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+                        
+                        <div class="md:col-span-2 card p-4 sm:p-6 flex flex-col justify-between glow-border fade-in" style="animation-delay: 0s;">
+                            <div>
+                                <h2 class="font-orbitron text-gray-400 text-base sm:text-lg">LOCATION: ${locationName.toUpperCase()}</h2>
+                                <p class="font-orbitron text-4xl sm:text-5xl font-bold text-white">${weather.temp.toFixed(1)}°C</p>
+                                <p class="text-base sm:text-lg text-gray-300 capitalize">Feels like ${weather.feels_like.toFixed(1)}°C. ${weather.description}.</p>
+                            </div>
+                            <div class="mt-4">
+                                <h3 class="font-orbitron text-base sm:text-lg text-cyan-400">HEALTH ADVISORY</h3>
+                                <p class="text-white text-sm sm:text-base">${healthRec}</p>
+                            </div>
+                        </div>
+
+                        <div class="card p-4 sm:p-6 flex flex-col items-center justify-center glow-border fade-in" style="animation-delay: 0.1s;">
+                           <h3 class="font-orbitron text-base sm:text-lg text-cyan-400 mb-2">AIR QUALITY INDEX</h3>
+                            <div class="relative w-full h-40 sm:h-48">
+                                <canvas id="aqiGaugeChart"></canvas>
+                                <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                    <p class="font-orbitron text-5xl sm:text-6xl font-bold" style="color: ${aqi.color}; text-shadow: ${aqi.glow};">${aqi.value}</p>
+                                    <p class="font-orbitron text-xl sm:text-2xl font-semibold" style="color: ${aqi.color};">${aqi.label}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card p-4 sm:p-6 flex flex-col items-center justify-center glow-border fade-in" style="animation-delay: 0.2s;">
+                           <h3 class="font-orbitron text-base sm:text-lg text-cyan-400 mb-2">WIND STATUS</h3>
+                           <div class="w-32 h-32 sm:w-36 sm:h-36 relative">
+                                <svg viewBox="0 0 100 100" class="w-full h-full">
+                                    <circle cx="50" cy="50" r="48" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="2"/>
+                                    <g fill="rgba(255,255,255,0.4)" font-family="Orbitron" font-size="8">
+                                        <text x="47" y="12">N</text><text x="47" y="94">S</text>
+                                        <text x="6" y="53">W</text><text x="88" y="53">E</text>
+                                    </g>
+                                    <g id="compass-dial" class="compass-dial" style="transform: rotate(${weather.wind.deg}deg); transform-origin: center;">
+                                         <polygon points="50,15 55,40 45,40" fill="#22d3ee"/><polygon points="50,85 55,60 45,60" fill="rgba(255,255,255,0.4)"/>
+                                         <circle cx="50" cy="50" r="5" fill="#22d3ee" stroke="black" stroke-width="1"/>
+                                    </g>
+                                </svg>
+                           </div>
+                           <p class="font-orbitron text-xl sm:text-2xl mt-2">${(weather.wind.speed * 3.6).toFixed(1)} km/h</p>
+                        </div>
+                        
+                        <div class="md:col-span-2 card p-6 grid grid-cols-2 sm:grid-cols-3 gap-4 glow-border fade-in" style="animation-delay: 0.3s;">
+                            <div class="text-center"><i data-lucide="cloud" class="w-8 h-8 sm:w-10 sm:h-10 mx-auto text-gray-400"></i><p class="font-orbitron mt-1 text-sm">Clouds</p><p class="text-sm sm:text-base">${weather.clouds}%</p></div>
+                            <div class="text-center"><i data-lucide="droplets" class="w-8 h-8 sm:w-10 sm:h-10 mx-auto text-blue-400"></i><p class="font-orbitron mt-1 text-sm">Humidity</p><p class="text-sm sm:text-base">${weather.humidity}%</p></div>
+                            <div class="text-center"><i data-lucide="gauge" class="w-8 h-8 sm:w-10 sm:h-10 mx-auto text-purple-400"></i><p class="font-orbitron mt-1 text-sm">Pressure</p><p class="text-sm sm:text-base">${weather.pressure} hPa</p></div>
+                            <div class="text-center"><i data-lucide="eye" class="w-8 h-8 sm:w-10 sm:h-10 mx-auto text-white"></i><p class="font-orbitron mt-1 text-sm">Visibility</p><p class="text-sm sm:text-base">${(weather.visibility / 1000).toFixed(1)} km</p></div>
+                            <div class="text-center"><i data-lucide="thermometer" class="w-8 h-8 sm:w-10 sm:h-10 mx-auto text-red-400"></i><p class="font-orbitron mt-1 text-sm">Feels Like</p><p class="text-sm sm:text-base">${weather.feels_like.toFixed(1)}°C</p></div>
+                            <div class="text-center"><i data-lucide="wind" class="w-8 h-8 sm:w-10 sm:h-10 mx-auto text-cyan-400"></i><p class="font-orbitron mt-1 text-sm">Wind</p><p class="text-sm sm:text-base">${weather.wind.speed.toFixed(1)} m/s</p></div>
+                        </div>
+
+                        <div class="md:col-span-2 lg:row-span-2 card p-4 flex flex-col items-center justify-center glow-border fade-in" style="animation-delay: 0.4s;">
+                            <h3 class="font-orbitron text-base sm:text-lg text-cyan-400 mb-2">GEOSPATIAL VIEW</h3>
+                            <div id="map" class="w-full h-full min-h-[300px] sm:min-h-[400px] lg:min-h-[300px] rounded-lg overflow-hidden border border-cyan-700/50" style="box-shadow: inset 0 0 15px rgba(0,255,255,0.2);"></div>
+                        </div>
+
+                        <div class="md:col-span-2 card p-4 sm:p-6 glow-border fade-in" style="animation-delay: 0.5s;">
+                           <h3 class="font-orbitron text-base sm:text-lg text-cyan-400 mb-2">POLLUTANT ANALYSIS (μg/m³)</h3>
+                           <div class="w-full h-64 sm:h-72"><canvas id="pollutantsChart"></canvas></div>
+                        </div>
+                        
+                        <div class="lg:col-span-4 md:col-span-2 card p-4 sm:p-6 glow-border fade-in" style="animation-delay: 0.6s;">
+                            <h3 class="font-orbitron text-base sm:text-lg text-cyan-400 mb-2">5-DAY TREND ANALYSIS</h3>
+                            <div class="w-full h-72 sm:h-80"><canvas id="forecastTrendChart"></canvas></div>
+                        </div>
+                        
+                        <div class="lg:col-span-4 md:col-span-2 card p-4 sm:p-6 glow-border fade-in" style="animation-delay: 0.7s;">
+                            <h3 class="font-orbitron text-base sm:text-lg text-cyan-400 mb-4 text-center">5-DAY SUMMARY</h3>
+                            <div class="flex flex-wrap justify-around items-center h-full">
+                                ${forecastHtml}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                lucide.createIcons();
+                createCharts(data);
+                createMap(data);
+            };
+
+            // --- Chart & Map Creation ---
+            const createMap = (data) => {
+                const { lat, lon, locationName, aqi } = data;
+                const mapElement = document.getElementById('map');
+                if (!mapElement) return;
+
+                mapInstance = L.map(mapElement, { zoomControl: false, attributionControl: false }).setView([lat, lon], 12);
+                L.control.zoom({ position: 'bottomright' }).addTo(mapInstance);
+
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                }).addTo(mapInstance);
+
+                const customMarker = L.divIcon({
+                    className: 'pulsing-marker',
+                    iconSize: [20, 20]
+                });
+
+                L.marker([lat, lon], { icon: customMarker }).addTo(mapInstance)
+                    .bindPopup(`<b>${locationName}</b><br>AQI: ${aqi.value} (${aqi.label})`)
+                    .openPopup();
+                
+                setTimeout(() => mapInstance.invalidateSize(), 100);
+            }
+
+            const createCharts = (data) => {
+                const { aqi, pollutants, detailedForecast } = data;
+                
+                // AQI Gauge
+                const aqiCtx = document.getElementById('aqiGaugeChart')?.getContext('2d');
+                if(aqiCtx) {
+                    chartInstances.aqi = new Chart(aqiCtx, {
+                        type: 'doughnut',
+                        data: {
+                            datasets: [{
+                                data: [aqi.value, 5 - aqi.value],
+                                backgroundColor: [aqi.color, 'rgba(255,255,255,0.05)'],
+                                borderColor: 'transparent', borderRadius: 20, cutout: '80%',
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { tooltip: { enabled: false }, legend: { display: false } }, rotation: -90, circumference: 180, }
+                    });
+                }
+
+                // Pollutants Polar Area Chart
+                const pollutantsCtx = document.getElementById('pollutantsChart')?.getContext('2d');
+                 if(pollutantsCtx) {
+                    chartInstances.pollutants = new Chart(pollutantsCtx, {
+                        type: 'polarArea',
+                        data: {
+                            labels: Object.keys(pollutants).map(k => k.replace(/_/g, '.').replace('2.5', '₂.₅').replace('10', '₁₀')),
+                            datasets: [{
+                                data: Object.values(pollutants),
+                                backgroundColor: [
+                                    'rgba(59, 130, 246, 0.6)', 'rgba(34, 197, 94, 0.6)', 'rgba(234, 179, 8, 0.6)',
+                                    'rgba(249, 115, 22, 0.6)', 'rgba(239, 68, 68, 0.6)', 'rgba(139, 92, 246, 0.6)', 'rgba(236, 72, 153, 0.6)'
+                                ],
+                                borderWidth: 0,
+                            }]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: { legend: { position: 'right', labels: { color: 'rgb(229, 231, 235)', boxWidth: 15, padding: 10 } } },
+                            scales: { r: { grid: { color: 'rgba(255, 255, 255, 0.1)' }, angleLines: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { display: false } } }
+                        }
+                    });
+                }
+
+                // Forecast Trend Chart
+                const forecastCtx = document.getElementById('forecastTrendChart')?.getContext('2d');
+                if (forecastCtx) {
+                    const gradient = forecastCtx.createLinearGradient(0, 0, 0, 300);
+                    gradient.addColorStop(0, 'rgba(251, 146, 60, 0.5)');
+                    gradient.addColorStop(1, 'rgba(251, 146, 60, 0)');
+
+                    chartInstances.forecast = new Chart(forecastCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: detailedForecast.map(d => d.time),
+                            datasets: [
+                                {
+                                    type: 'line',
+                                    label: 'Temperature (°C)',
+                                    data: detailedForecast.map(d => d.temp),
+                                    borderColor: '#fb923c',
+                                    backgroundColor: gradient,
+                                    fill: true,
+                                    pointBackgroundColor: '#ffffff',
+                                    pointBorderColor: '#fb923c',
+                                    tension: 0.4,
+                                    yAxisID: 'yTemp',
+                                },
+                                {
+                                    type: 'bar',
+                                    label: 'Precipitation Chance (%)',
+                                    data: detailedForecast.map(d => d.pop),
+                                    backgroundColor: 'rgba(59, 130, 246, 0.6)',
+                                    borderColor: 'transparent',
+                                    borderRadius: 4,
+                                    yAxisID: 'yPop',
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'top', align: 'end', labels: { color: 'rgb(229, 231, 235)', boxWidth: 15, padding: 20 } },
+                                tooltip: {
+                                    mode: 'index', intersect: false,
+                                    callbacks: {
+                                        title: (tooltipItems) => new Date(tooltipItems[0].parsed.x).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    type: 'time',
+                                    time: { unit: 'day', tooltipFormat: 'MMM d, h:mm a' },
+                                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                                    ticks: { color: 'rgb(209, 213, 219)' }
+                                },
+                                yTemp: {
+                                    position: 'left',
+                                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                                    ticks: { color: 'rgb(209, 213, 219)', callback: value => `${value}°C` },
+                                    title: { display: true, text: 'Temperature', color: 'rgb(209, 213, 219)' }
+                                },
+                                yPop: {
+                                    position: 'right',
+                                    min: 0, max: 100,
+                                    grid: { drawOnChartArea: false }, 
+                                    ticks: { color: 'rgb(209, 213, 219)', callback: value => `${value}%` },
+                                    title: { display: true, text: 'Precipitation', color: 'rgb(209, 213, 219)' }
+                                }
+                            },
+                            interaction: { mode: 'index', intersect: false }
+                        }
+                    });
+                }
+            }
+
+            // --- Auto-search on load for default location ---
+            handleSearch(new Event('submit'));
+        });
+    </script>
+</body>
+</html>
