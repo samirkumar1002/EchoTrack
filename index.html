@@ -58,7 +58,7 @@
 
         #app {
             background-image:
-                radial-gradient(ellipse at 70% 20%, var(--aqi-color, #4ade80) 0%, transparent S40%),
+                radial-gradient(ellipse at 70% 20%, var(--aqi-color, #4ade80) 0%, transparent 40%),
                 radial-gradient(ellipse at 30% 80%, #3b82f6 0%, transparent 40%);
             background-color: #0c0a09;
             transition: background-image 1s ease-in-out;
@@ -134,6 +134,11 @@
         .weather-icon .rain-2 { animation: rain-drop 1.5s infinite linear; animation-delay: 0.5s; }
         .weather-icon .rain-3 { animation: rain-drop 1.5s infinite linear; animation-delay: 1s; }
 
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
     </style>
 </head>
 <body class="text-gray-200">
@@ -171,6 +176,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            // API Key for OpenWeatherMap
             const OPENWEATHER_API_KEY = '40f211cfe39230179eefdfa9379ae888'; 
 
             // --- DOM Elements ---
@@ -185,13 +191,48 @@
             // --- State Instances ---
             let chartInstances = {};
             let mapInstance = null;
+            
+            // --- Error Renderer ---
+            const renderError = (message) => {
+                setLoadingState(false);
+                welcomeMessage.classList.add('hidden');
+                contentArea.style.opacity = '1';
+                contentArea.classList.add('fade-in');
+                const fullMessage = `${message}`;
+                contentArea.innerHTML = `<div class="card col-span-full p-8 text-center bg-red-900/50 border-red-700 fade-in"><i data-lucide="scan-error" class="mx-auto w-16 h-16 text-red-400 mb-4"></i><h3 class="text-3xl font-orbitron text-red-300">Transmission Error</h3><p class="text-red-400 mt-2">${fullMessage}</p></div>`;
+                lucide.createIcons();
+            };
 
-            // --- Initial Setup ---
+            // --- Initial Setup & API Key Check ---
             lucide.createIcons();
             setInterval(() => {
                 const now = new Date();
                 timeDisplay.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             }, 1000);
+
+            // --- AQI Calculation ---
+            const getAQIInfo = (pm25) => {
+                const breakpoints = [
+                    { highPM: 12.0, lowPM: 0.0, highAQI: 50, lowAQI: 0, label: "Good", color: "#4ade80", glow: "0 0 15px #4ade80", colorRgb: "74, 222, 128", rec: "Air quality is excellent. A perfect day for all outdoor activities!" },
+                    { highPM: 35.4, lowPM: 12.1, highAQI: 100, lowAQI: 51, label: "Moderate", color: "#facc15", glow: "0 0 15px #facc15", colorRgb: "250, 204, 21", rec: "Air quality is acceptable. Sensitive groups may consider reducing prolonged outdoor exertion." },
+                    { highPM: 55.4, lowPM: 35.5, highAQI: 150, lowAQI: 101, label: "Unhealthy (SG)", color: "#fb923c", glow: "0 0 15px #fb923c", colorRgb: "251, 146, 60", rec: "Sensitive groups may experience health effects. The general public is not likely to be affected." },
+                    { highPM: 150.4, lowPM: 55.5, highAQI: 200, lowAQI: 151, label: "Unhealthy", color: "#f87171", glow: "0 0 15px #f87171", colorRgb: "248, 113, 113", rec: "Everyone may begin to experience health effects; members of sensitive groups may experience more serious health effects." },
+                    { highPM: 250.4, lowPM: 150.5, highAQI: 300, lowAQI: 201, label: "Very Unhealthy", color: "#ef4444", glow: "0 0 15px #ef4444", colorRgb: "239, 68, 68", rec: "Health alert: everyone may experience more serious health effects. Avoid all outdoor activities." },
+                    { highPM: 500.4, lowPM: 250.5, highAQI: 500, lowAQI: 301, label: "Hazardous", color: "#dc2626", glow: "0 0 15px #dc2626", colorRgb: "220, 38, 38", rec: "Health warning of emergency conditions. The entire population is more likely to be affected." }
+                ];
+                
+                let category = breakpoints.find(b => pm25 >= b.lowPM && pm25 <= b.highPM);
+                if (!category) {
+                    if (pm25 > 500.4) category = breakpoints[breakpoints.length - 1];
+                    else category = breakpoints[0];
+                }
+
+                const aqi = Math.round(
+                    ((category.highAQI - category.lowAQI) / (category.highPM - category.lowPM)) * (pm25 - category.lowPM) + category.lowAQI
+                );
+
+                return { value: Math.min(aqi, 500), ...category };
+            };
 
             // --- Search Handler ---
             const handleSearch = async (event) => {
@@ -207,7 +248,7 @@
                 try {
                     const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${location}&limit=1&appid=${OPENWEATHER_API_KEY}`;
                     const geoResponse = await fetch(geoUrl);
-                    if (!geoResponse.ok) throw new Error(`Network response error: ${geoResponse.status}`);
+                    if (!geoResponse.ok) throw new Error(`API Key error or network issue (${geoResponse.status}). Please verify your key.`);
                     const geoData = await geoResponse.json();
                     if (!geoData || geoData.length === 0) throw new Error(`Location "${location}" not found. Please enter a specific city name.`);
                     
@@ -247,24 +288,10 @@
             searchForm.addEventListener('submit', handleSearch);
 
             const processApiData = (locationName, airData, weatherData, forecastData, lat, lon) => {
-                const aqi = airData.list[0].main.aqi;
+                const pollutants = airData.list[0].components;
+                const pm25 = pollutants.pm2_5 || 0;
+                const aqiInfo = getAQIInfo(pm25);
                 
-                const aqiLevels = {
-                    1: { label: "Good", color: "#4ade80", glow: "0 0 15px #4ade80, 0 0 30px #4ade80", colorRgb: "74, 222, 128" },
-                    2: { label: "Fair", color: "#a3e635", glow: "0 0 15px #a3e635, 0 0 30px #a3e635", colorRgb: "163, 230, 53" },
-                    3: { label: "Moderate", color: "#facc15", glow: "0 0 15px #facc15, 0 0 30px #facc15", colorRgb: "250, 204, 21" },
-                    4: { label: "Poor", color: "#fb923c", glow: "0 0 15px #fb923c, 0 0 30px #fb923c", colorRgb: "251, 146, 60" },
-                    5: { label: "Hazardous", color: "#f87171", glow: "0 0 15px #f87171, 0 0 30px #f87171", colorRgb: "248, 113, 113" }
-                };
-
-                const healthRecs = {
-                    1: "Excellent air quality. Perfect day for all outdoor activities!",
-                    2: "Air quality is acceptable. Great for most activities.",
-                    3: "Sensitive groups may experience effects. Limit prolonged outdoor exertion.",
-                    4: "Everyone may begin to experience health effects. Limit time outdoors.",
-                    5: "Health alert: everyone may experience more serious health effects. Avoid outdoor activities."
-                };
-
                 // Process 5-day forecast from 3-hour data
                 const dailyForecasts = {};
                 forecastData.list.forEach(item => {
@@ -296,8 +323,8 @@
 
                 return {
                     locationName, lat, lon,
-                    aqi: { value: aqi, ...aqiLevels[aqi] },
-                    healthRec: healthRecs[aqi],
+                    aqi: aqiInfo,
+                    healthRec: aqiInfo.rec,
                     weather: {
                         temp: weatherData.main.temp,
                         feels_like: weatherData.main.feels_like,
@@ -314,21 +341,15 @@
                 };
             };
             
-            const setLoadingState = (isLoading) => {
+            function setLoadingState(isLoading) {
                 searchButton.disabled = isLoading;
-                searchButtonContent.innerHTML = isLoading 
-                    ? `<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>` 
-                    : 'ANALYZE';
-            };
+                if (isLoading) {
+                    searchButtonContent.innerHTML = `<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+                } else {
+                    searchButtonContent.innerHTML = 'ANALYZE';
+                }
+            }
             
-            const renderError = (message) => {
-                contentArea.innerHTML = `<div class="card col-span-full p-8 text-center bg-red-900/50 border-red-700 fade-in"><i data-lucide="scan-error" class="mx-auto w-16 h-16 text-red-400 mb-4"></i><h3 class="text-3xl font-orbitron text-red-300">Transmission Error</h3><p class="text-red-400 mt-2">${message}</p></div>`;
-                welcomeMessage.classList.add('hidden');
-                contentArea.style.opacity = '1';
-                contentArea.classList.add('fade-in');
-                lucide.createIcons();
-            };
-
             const destroyInstances = () => {
                 Object.values(chartInstances).forEach(chart => chart.destroy());
                 chartInstances = {};
@@ -411,8 +432,8 @@
                                         <text x="6" y="53">W</text><text x="88" y="53">E</text>
                                     </g>
                                     <g id="compass-dial" class="compass-dial" style="transform: rotate(${weather.wind.deg}deg); transform-origin: center;">
-                                         <polygon points="50,15 55,40 45,40" fill="#22d3ee"/><polygon points="50,85 55,60 45,60" fill="rgba(255,255,255,0.4)"/>
-                                         <circle cx="50" cy="50" r="5" fill="#22d3ee" stroke="black" stroke-width="1"/>
+                                           <polygon points="50,15 55,40 45,40" fill="#22d3ee"/><polygon points="50,85 55,60 45,60" fill="rgba(255,255,255,0.4)"/>
+                                           <circle cx="50" cy="50" r="5" fill="#22d3ee" stroke="black" stroke-width="1"/>
                                     </g>
                                 </svg>
                            </div>
@@ -465,8 +486,9 @@
                 mapInstance = L.map(mapElement, { zoomControl: false, attributionControl: false }).setView([lat, lon], 12);
                 L.control.zoom({ position: 'bottomright' }).addTo(mapInstance);
 
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                // Changed tile layer to Esri WorldImagery for satellite view
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
                 }).addTo(mapInstance);
 
                 const customMarker = L.divIcon({
@@ -491,7 +513,7 @@
                         type: 'doughnut',
                         data: {
                             datasets: [{
-                                data: [aqi.value, 5 - aqi.value],
+                                data: [aqi.value, 500 - aqi.value],
                                 backgroundColor: [aqi.color, 'rgba(255,255,255,0.05)'],
                                 borderColor: 'transparent', borderRadius: 20, cutout: '80%',
                             }]
@@ -506,7 +528,16 @@
                     chartInstances.pollutants = new Chart(pollutantsCtx, {
                         type: 'polarArea',
                         data: {
-                            labels: Object.keys(pollutants).map(k => k.replace(/_/g, '.').replace('2.5', '₂.₅').replace('10', '₁₀')),
+                            labels: Object.keys(pollutants).map(k => {
+                                let label = k.toUpperCase().replace(/_/g, '');
+                                if (label === 'PM25') return 'PM₂.₅';
+                                if (label === 'PM10') return 'PM₁₀';
+                                if (label === 'NO2') return 'NO₂';
+                                if (label === 'SO2') return 'SO₂';
+                                if (label === 'O3') return 'O₃';
+                                if (label === 'NH3') return 'NH₃';
+                                return label;
+                            }),
                             datasets: [{
                                 data: Object.values(pollutants),
                                 backgroundColor: [
